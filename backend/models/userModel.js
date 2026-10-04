@@ -44,25 +44,9 @@ const userSchema = new mongoose.Schema(
       type: String,
       trim: true,
     },
-    skills: [
-      {
-        type: String,
-        trim: true,
-      },
-    ],
-    services: [
-      {
-        type: String,
-        trim: true,
-      },
-    ],
     experience: {
       type: Number,
       min: [0, 'Experience cannot be negative'],
-    },
-    availability: {
-      type: Boolean,
-      default: true,
     },
 
     // General fields
