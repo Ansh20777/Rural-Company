@@ -1,4 +1,4 @@
-import { ChevronDown, Menu, X, ArrowUpRight } from 'lucide-react';
+import { Menu, X, ArrowUpRight } from 'lucide-react';
 import Avatar from './Avatar.jsx';
 
 export default function SiteHeader({ t, lang, setLang, onLogin, mobileMenu, setMobileMenu, mode = 'landing', role }) {
@@ -9,7 +9,7 @@ export default function SiteHeader({ t, lang, setLang, onLogin, mobileMenu, setM
     </nav>}
     {mode === 'dashboard' && <div className="dashboard-header-label">{role === 'worker' ? 'WORKER SPACE' : 'CUSTOMER SPACE'} <span className="demo-badge">DEMO PREVIEW</span></div>}
     <div className="header-actions">
-      <div className="language-select"><span className="language-symbol">अ</span><select aria-label="Choose language" value={lang} onChange={(event) => setLang(event.target.value)}><option value="en">English</option><option value="hi">हिन्दी</option></select><ChevronDown size={13} /></div>
+      <button className="language-toggle" type="button" aria-label={`Switch language to ${lang === 'en' ? 'Hindi' : 'English'}`} onClick={() => setLang(lang === 'en' ? 'hi' : 'en')}><span>{lang === 'en' ? 'EN' : 'हिं'}</span><span className="toggle-track"><i/></span><span>{lang === 'en' ? 'हिंदी' : 'EN'}</span></button>
       {mode === 'landing' && <><button className="text-button" onClick={onLogin}>{t.signIn}</button><a className="button button-dark button-small" href="#choose">{t.getStarted}<ArrowUpRight size={15} /></a></>}
       {mode === 'dashboard' && <Avatar initials={role === 'worker' ? 'RK' : 'AS'} color="sage"/>}
     </div>
