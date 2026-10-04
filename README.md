@@ -5,6 +5,11 @@ Features of the Web App
 - Employers can search workers, view profiles, and hire them.
 - Workers can search, filter, and apply for jobs.
 - Includes job status tracking and ratings/reviews after completion.
+
+  
+===========================================================================================================
+
+
 How We Implement It
 - Build the frontend using React + Tailwind CSS and backend using Node.js + Express.
 - Store users, jobs, applications, and reviews in MongoDB.
