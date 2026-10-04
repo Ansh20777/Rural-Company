@@ -23,7 +23,8 @@ export const createReview = async (req, res) => {
     const customerId = req.user.userId;
     const { bookingId, jobId, workerId, rating, comment } = req.body;
 
-    if (rating === undefined || rating < 1 || rating > 5) {
+    const numericRating = Number(rating);
+    if (!Number.isFinite(numericRating) || numericRating < 1 || numericRating > 5) {
       return res.status(400).json({ message: "Rating must be between 1 and 5" });
     }
     if (!bookingId && !jobId) {
@@ -77,11 +78,15 @@ export const createReview = async (req, res) => {
       reviewData = { job: jobId, worker: workerId };
     }
 
-    const review = await Review.create({ ...reviewData, reviewer: customerId, rating, comment });
+    const review = await Review.create({ ...reviewData, reviewer: customerId, rating: numericRating, comment });
     const workerRating = await updateWorkerRating(reviewData.worker);
 
     res.status(201).json({ message: "Review added successfully", review, workerRating });
   } catch (error) {
+    if (error.code === 11000) return res.status(409).json({ message: "A review has already been submitted for this work" });
+    if (error.name === "ValidationError" || error.name === "CastError") {
+      return res.status(400).json({ message: error.message });
+    }
     res.status(500).json({ message: "Server error", error: error.message });
   }
 };

@@ -12,7 +12,7 @@ export const updateWorkerProfile = async (req, res) => {
     }
 
     const fields = [
-      "name", "phone", "location", "profession", "experience",
+      "name", "age", "phone", "address", "pinCode", "location", "profession", "experience",
       "bio", "expectedRate", "rateUnit", "skills", "workTypes",
     ];
 
@@ -22,8 +22,9 @@ export const updateWorkerProfile = async (req, res) => {
 
     // Profile image uploaded using Multer
     if (req.file) {
-      // TODO: upload req.file.buffer to Cloudinary and save the URL in worker.profileImage
-      console.log("Image received:", req.file.originalname);
+      worker.profileImage = `data:${req.file.mimetype};base64,${req.file.buffer.toString("base64")}`;
+    } else if (typeof req.body.profileImage === "string") {
+      worker.profileImage = req.body.profileImage;
     }
 
     await worker.save();
@@ -89,6 +90,18 @@ export const getWorkers = async (req, res) => {
     }
 
     if (minExperience) filter.experience = { $gte: Number(minExperience) };
+
+    if (req.query.maxExperience) {
+      filter.experience = { ...(filter.experience || {}), $lte: Number(req.query.maxExperience) };
+    }
+    if (req.query.rateUnit) filter.rateUnit = req.query.rateUnit;
+    if (req.query.q) {
+      const pattern = { $regex: escapeRegex(req.query.q), $options: "i" };
+      filter.$and = [
+        ...(filter.$and || []),
+        { $or: [{ name: pattern }, { profession: pattern }, { skills: pattern }, { bio: pattern }] },
+      ];
+    }
 
     const [workers, total] = await Promise.all([
       User.find(filter)

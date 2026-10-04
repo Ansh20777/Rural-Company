@@ -3,7 +3,7 @@ import SiteHeader from '../components/SiteHeader.jsx';
 import PreviewDock from '../components/PreviewDock.jsx';
 import Toast from '../components/Toast.jsx';
 
-export default function SignupPage({ lang, setLang, role, setRole, form, setForm, onHome, onSubmit, onPreview, notice, announce }) {
+export default function SignupPage({ lang, setLang, role, setRole, form, setForm, onHome, onSubmit, onPreview, notice, announce, onLogin }) {
   const update = (field) => (event) => setForm({ ...form, [field]: event.target.value });
   return <div className={lang === 'hi' ? 'app hindi' : 'app'}>
     <SiteHeader lang={lang} setLang={setLang} t={{}} mode="auth" onLogin={() => announce('Login will be connected with authentication later.')}/>
@@ -28,12 +28,15 @@ export default function SignupPage({ lang, setLang, role, setRole, form, setForm
             <label>Your profession<select required value={form.profession} onChange={update('profession')}><option value="">Choose your profession</option><option>Carpenter</option><option>Plumber</option><option>Electrician</option><option>Farmer / farm worker</option><option>Driver</option><option>Other skilled work</option></select></label>
             <label>Work experience (years)<input required type="number" min="0" max="60" value={form.experience} onChange={update('experience')} placeholder="e.g. 5"/></label>
           </> : null}
-          <label>Home address / location<input required value={form.address} onChange={update('address')} placeholder="Village, town or area"/></label>
+          <label>Home address<input required value={form.address} onChange={update('address')} placeholder="House, street and village"/></label>
+          <label>District<input required value={form.district || ''} onChange={update('district')} placeholder="Your district"/></label>
+          <label>State<input required value={form.state || ''} onChange={update('state')} placeholder="Your state"/></label>
           <label>PIN code<input required type="text" inputMode="numeric" pattern="[0-9]{6}" maxLength="6" value={form.pinCode} onChange={update('pinCode')} placeholder="6-digit PIN code"/></label>
           <button className="button button-dark auth-submit" type="submit">Continue <ArrowRight size={16}/></button>
         </form>
         <div className="auth-divider"><span/>or continue with<span/></div>
         <div className="social-buttons"><button onClick={() => announce('Google sign-in will be connected later.')}>G&nbsp; Google</button><button onClick={() => announce('Facebook sign-in will be connected later.')}>f&nbsp; Facebook</button></div>
+        <p className="auth-legal">Already have an account? <button className="inline-link" onClick={onLogin}>Sign in</button></p>
         <p className="auth-legal">By continuing, you agree to our <a href="#terms">Terms</a> and <a href="#privacy">Privacy Policy</a>.</p>
       </section>
     </main>

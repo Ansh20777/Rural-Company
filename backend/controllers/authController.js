@@ -8,14 +8,27 @@ const publicUser = (user) => ({
   email: user.email,
   role: user.role,
   phone: user.phone,
+  age: user.age,
+  address: user.address,
+  pinCode: user.pinCode,
   location: user.location,
   profession: user.profession,
+  experience: user.experience,
+  skills: user.skills,
+  bio: user.bio,
+  expectedRate: user.expectedRate,
+  rateUnit: user.rateUnit,
+  workTypes: user.workTypes,
+  availability: user.availability,
+  rating: user.rating,
+  reviewCount: user.reviewCount,
+  profileImage: user.profileImage,
 });
 
 // REGISTER
 export const registerUser = async (req, res) => {
   try {
-    const { name, email, password, role, phone, location, profession } = req.body;
+    const { name, email, password, role, phone, age, address, pinCode, location, profession, experience } = req.body;
 
     if (!name || !email || !password || !role) {
       return res.status(400).json({ message: "Name, email, password and role are required" });
@@ -42,8 +55,12 @@ export const registerUser = async (req, res) => {
       password: hashedPassword,
       role,
       phone,
+      age,
+      address,
+      pinCode,
       location,
       profession: role === "worker" ? profession : undefined,
+      experience: role === "worker" ? experience : undefined,
       availability: true,
     });
 
@@ -52,6 +69,29 @@ export const registerUser = async (req, res) => {
       user: publicUser(user),
     });
   } catch (error) {
+    res.status(500).json({ message: "Server error", error: error.message });
+  }
+};
+
+// UPDATE SHARED ACCOUNT PROFILE (customer or worker)
+export const updateMyProfile = async (req, res) => {
+  try {
+    const user = await User.findById(req.user.userId);
+    if (!user) return res.status(404).json({ message: "User not found" });
+
+    const fields = ["name", "age", "phone", "address", "pinCode", "location", "profileImage"];
+    fields.forEach((field) => {
+      if (req.body[field] !== undefined) user[field] = req.body[field];
+    });
+
+    await user.save();
+    const data = user.toObject();
+    delete data.password;
+    res.status(200).json({ message: "Profile updated successfully", user: data });
+  } catch (error) {
+    if (error.name === "ValidationError" || error.name === "CastError") {
+      return res.status(400).json({ message: error.message });
+    }
     res.status(500).json({ message: "Server error", error: error.message });
   }
 };

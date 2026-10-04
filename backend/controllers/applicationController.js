@@ -56,6 +56,9 @@ export const getJobApplications = async (req, res) => {
 
     res.status(200).json({ count: applications.length, job, applications });
   } catch (error) {
+    if (error.name === "ValidationError" || error.name === "CastError") {
+      return res.status(400).json({ message: error.message });
+    }
     res.status(500).json({ message: "Server error", error: error.message });
   }
 };
@@ -90,6 +93,11 @@ export const updateApplicationStatus = async (req, res) => {
     if (status === "accepted") {
       if (job.status !== "open") {
         return res.status(400).json({ message: "This job is not open for hiring" });
+      }
+
+      const acceptedCountBefore = await Application.countDocuments({ job: job._id, status: "accepted" });
+      if (acceptedCountBefore >= job.positions) {
+        return res.status(409).json({ message: "All positions for this job have already been filled" });
       }
 
       application.status = "accepted";

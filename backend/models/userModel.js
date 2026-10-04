@@ -19,6 +19,7 @@ const userSchema = new mongoose.Schema(
       required: [true, "Password is required"],
       minlength: [6, "Password must be at least 6 characters long"],
     },
+    age: { type: Number, min: 18, max: 100 },
     role: {
       type: String,
       enum: ["worker", "customer"],
@@ -26,6 +27,8 @@ const userSchema = new mongoose.Schema(
       required: true,
     },
     phone: { type: String, trim: true },
+    address: { type: String, trim: true, maxlength: 300 },
+    pinCode: { type: String, trim: true, match: [/^\d{6}$/, "PIN code must contain 6 digits"] },
     location: {
       village: { type: String, trim: true },
       district: { type: String, trim: true },
