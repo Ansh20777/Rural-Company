@@ -86,5 +86,4 @@ const userSchema = new mongoose.Schema(
 userSchema.index({ role: 1, 'location.district': 1, profession: 1 });
 
 const User = mongoose.model('User', userSchema);
-
-module.exports = User;
+export default User;

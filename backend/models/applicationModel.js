@@ -35,5 +35,4 @@ applicationSchema.index({ job: 1, worker: 1 }, { unique: true });
 applicationSchema.index({ worker: 1, status: 1 });
 
 const Application = mongoose.model('Application', applicationSchema);
-
-module.exports = Application;
+export default Application;
