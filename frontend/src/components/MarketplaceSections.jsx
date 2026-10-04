@@ -1,10 +1,10 @@
 import { ArrowDownRight, ArrowRight, ArrowUpRight, BriefcaseBusiness, Clock3, MapPin, Search, ShieldCheck, UsersRound } from 'lucide-react';
 import Avatar from './Avatar.jsx';
 
-export function SearchSection({ t, categories, activeFilter, setActiveFilter, query, setQuery, location, setLocation, onSearch }) {
+export function SearchSection({ t, query, setQuery, location, setLocation, onSearch }) {
   return <section className="search-section wrap" aria-label="Search nearby workers and jobs"><form className="search-box" onSubmit={onSearch}>
     <label className="search-field"><Search size={19}/><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={t.searchPlaceholder} aria-label={t.searchPlaceholder}/></label><span className="search-divider"/><label className="location-field"><MapPin size={18}/><input value={location} onChange={(event) => setLocation(event.target.value)} placeholder={t.locationPlaceholder} aria-label={t.locationPlaceholder}/></label><button className="button button-green" type="submit">{t.search}<ArrowRight size={15}/></button>
-  </form><div className="popular-row"><span>{t.popular}</span>{categories.map((category) => <button key={category} className={activeFilter === category ? 'filter-chip selected' : 'filter-chip'} onClick={() => {setActiveFilter(category);setQuery(category === 'all' ? '' : t[category]);}}>{t[category]}</button>)}</div></section>;
+  </form></section>;
 }
 
 export function StatsSection({ t }) {
