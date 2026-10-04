@@ -48,7 +48,10 @@ const userSchema = new mongoose.Schema(
       type: Number,
       min: [0, 'Experience cannot be negative'],
     },
-
+    availability:{
+      type: Boolean,
+      required: true
+    },
     // General fields
     rating: {
       type: Number,

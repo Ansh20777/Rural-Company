@@ -44,6 +44,7 @@ export const registerUser = async (req, res) => {
       phone,
       location,
       profession,
+      availability: true
     });
 
     res.status(201).json({
