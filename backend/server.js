@@ -5,6 +5,7 @@ import connectDB from "./config/db.js";
 import authRoutes from "./routes/authRoutes.js";
 import workerRoutes from "./routes/workerRoutes.js";
 import bookingRoutes from "./routes/bookingRoutes.js"
+import reviewRoutes from "./routes/reviewRoutes.js";
 
 config();
 
@@ -20,7 +21,8 @@ app.use(express.json());
 //api routes
 app.use("/api/user",authRoutes);
 app.use("/api/workers", workerRoutes);
-app.use("/api/booking", workerRoutes);
+app.use("/api/booking", bookingRoutes);
+app.use("/api/reviews", reviewRoutes);
 
 
 const PORT = process.env.PORT || 5000;

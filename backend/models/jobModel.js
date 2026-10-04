@@ -56,5 +56,4 @@ const jobSchema = new mongoose.Schema(
 jobSchema.index({ status: 1, 'location.district': 1, profession: 1 });
 
 const Job = mongoose.model('Job', jobSchema);
-
-module.exports = Job;
+export default Job;
