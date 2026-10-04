@@ -1,45 +1,27 @@
 import mongoose from "mongoose";
 
+// A review belongs to EITHER a booking (quick job) OR a job (long job)
 const reviewSchema = new mongoose.Schema(
   {
-    job: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: 'Job',
-      required: [true, 'Job reference is required'],
-    },
-    reviewer: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: 'User',
-      required: [true, 'Reviewer reference is required'],
-    },
-    reviewedUser: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: 'User',
-      required: [true, 'Reviewed user reference is required'],
-    },
-    rating: {
-      type: Number,
-      required: [true, 'Rating is required'],
-      min: [1, 'Rating must be at least 1'],
-      max: [5, 'Rating cannot exceed 5'],
-    },
-    comment: {
-      type: String,
-      trim: true,
-      default: '',
-    },
+    booking: { type: mongoose.Schema.Types.ObjectId, ref: "Booking" },
+    job: { type: mongoose.Schema.Types.ObjectId, ref: "Job" },
+    reviewer: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
+    worker: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
+    rating: { type: Number, required: true, min: 1, max: 5 },
+    comment: { type: String, trim: true },
   },
-  {
-    timestamps: { createdAt: true, updatedAt: false },
-  }
+  { timestamps: true }
 );
 
-// Prevent a user from reviewing the same user multiple times for the same job
-reviewSchema.index({ job: 1, reviewer: 1, reviewedUser: 1 }, { unique: true });
+// Unique only when the field exists
+reviewSchema.index(
+  { booking: 1 },
+  { unique: true, partialFilterExpression: { booking: { $exists: true } } }
+);
+reviewSchema.index(
+  { job: 1, worker: 1 },
+  { unique: true, partialFilterExpression: { job: { $exists: true } } }
+);
 
-// Optimize lookups for calculating user average ratings
-reviewSchema.index({ reviewedUser: 1 });
-
-const Review = mongoose.model('Review', reviewSchema);
-
-module.exports = Review;
+const Review = mongoose.model("Review", reviewSchema);
+export default Review;
