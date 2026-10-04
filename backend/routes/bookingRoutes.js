@@ -1,47 +1,18 @@
 import express from "express";
-
 import {
   createBooking,
   getMyBookings,
   getBookingById,
-  closeBooking
+  updateBookingStatus,
 } from "../controllers/bookingController.js";
-
 import authMiddleware from "../middleware/auth.js";
+import requireRole from "../middleware/role.js";
 
 const router = express.Router();
 
-
-// Customer books a worker
-router.post(
-  "/",
-  authMiddleware,
-  createBooking
-);
-
-
-// Get customer's/worker's bookings
-router.get(
-  "/my",
-  authMiddleware,
-  getMyBookings
-);
-
-
-// Get one booking
-router.get(
-  "/:id",
-  authMiddleware,
-  getBookingById
-);
-
-
-// Worker finishes the job
-router.put(
-  "/:id/close",
-  authMiddleware,
-  closeBooking
-);
-
+router.post("/", authMiddleware, requireRole("customer"), createBooking); // customer books a worker
+router.get("/my", authMiddleware, getMyBookings);                         // customer's / worker's bookings
+router.get("/:id", authMiddleware, getBookingById);
+router.put("/:id/status", authMiddleware, updateBookingStatus);           // body: { "status": "accepted" }
 
 export default router;

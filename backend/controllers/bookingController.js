@@ -1,195 +1,135 @@
 import Booking from "../models/bookingModel.js";
 import User from "../models/userModel.js";
+import { isValidId } from "../utils/helpers.js";
 
+// Who can move a booking to which status
+const transitions = {
+  worker: { pending: ["accepted", "rejected"], accepted: ["completed"] },
+  customer: { pending: ["cancelled"], accepted: ["cancelled"] },
+};
 
-// CREATE BOOKING
+// CREATE BOOKING (customer only)
 export const createBooking = async (req, res) => {
   try {
     const customerId = req.user.userId;
-
-    const {
-      workerId,
-      description,
-      location
-    } = req.body;
+    const { workerId, description, location, scheduledDate, budget } = req.body;
 
     if (!workerId || !description || !location) {
-      return res.status(400).json({
-        message: "Worker, description and location are required"
-      });
+      return res.status(400).json({ message: "Worker, description and location are required" });
+    }
+    if (!isValidId(workerId)) {
+      return res.status(400).json({ message: "Invalid worker id" });
     }
 
-    // Find worker
-    const worker = await User.findOne({
-      _id: workerId,
-      role: "worker"
-    });
+    const worker = await User.findOne({ _id: workerId, role: "worker" });
+    if (!worker) return res.status(404).json({ message: "Worker not found" });
 
-    if (!worker) {
-      return res.status(404).json({
-        message: "Worker not found"
-      });
-    }
-
-    // Check if worker is available
     if (!worker.availability) {
-      return res.status(400).json({
-        message: "Worker is currently busy"
-      });
+      return res.status(400).json({ message: "Worker is currently not available" });
     }
 
-    // Create booking
+    // Stop the customer from spamming the same worker
+    const duplicate = await Booking.findOne({
+      customer: customerId,
+      worker: workerId,
+      status: { $in: ["pending", "accepted"] },
+    });
+    if (duplicate) {
+      return res.status(400).json({ message: "You already have an active booking with this worker" });
+    }
+
     const booking = await Booking.create({
       customer: customerId,
       worker: workerId,
       profession: worker.profession,
       description,
       location,
-      status: "open"
+      scheduledDate,
+      budget,
+      status: "pending",
     });
 
-    // Worker becomes busy
-    worker.availability = false;
-
-    await worker.save();
-
-    res.status(201).json({
-      message: "Worker booked successfully",
-      booking
-    });
-
+    res.status(201).json({ message: "Booking request sent to worker", booking });
   } catch (error) {
-    res.status(500).json({
-      message: "Server error",
-      error: error.message
-    });
+    res.status(500).json({ message: "Server error", error: error.message });
   }
 };
 
-
-// GET MY BOOKINGS
+// GET MY BOOKINGS (?status=pending optional)
 export const getMyBookings = async (req, res) => {
   try {
     const userId = req.user.userId;
+    const filter = { $or: [{ customer: userId }, { worker: userId }] };
+    if (req.query.status) filter.status = req.query.status;
 
-    const bookings = await Booking.find({
-      $or: [
-        { customer: userId },
-        { worker: userId }
-      ]
-    })
+    const bookings = await Booking.find(filter)
       .populate("customer", "name phone")
-      .populate(
-        "worker",
-        "name phone profession location rating profileImage availability"
-      )
+      .populate("worker", "name phone profession location rating profileImage availability")
       .sort({ createdAt: -1 });
 
-    res.status(200).json({
-      count: bookings.length,
-      bookings
-    });
-
+    res.status(200).json({ count: bookings.length, bookings });
   } catch (error) {
-    res.status(500).json({
-      message: "Server error",
-      error: error.message
-    });
+    res.status(500).json({ message: "Server error", error: error.message });
   }
 };
-
 
 // GET BOOKING BY ID
 export const getBookingById = async (req, res) => {
   try {
     const userId = req.user.userId;
 
+    if (!isValidId(req.params.id)) {
+      return res.status(400).json({ message: "Invalid booking id" });
+    }
+
     const booking = await Booking.findById(req.params.id)
       .populate("customer", "name phone")
-      .populate(
-        "worker",
-        "name phone profession location rating profileImage"
-      );
+      .populate("worker", "name phone profession location rating profileImage");
 
-    if (!booking) {
-      return res.status(404).json({
-        message: "Booking not found"
-      });
+    if (!booking) return res.status(404).json({ message: "Booking not found" });
+
+    if (booking.customer._id.toString() !== userId && booking.worker._id.toString() !== userId) {
+      return res.status(403).json({ message: "You are not allowed to view this booking" });
     }
 
-    // Only customer or worker involved can view it
-    if (
-      booking.customer._id.toString() !== userId &&
-      booking.worker._id.toString() !== userId
-    ) {
-      return res.status(403).json({
-        message: "You are not allowed to view this booking"
-      });
-    }
-
-    res.status(200).json({
-      booking
-    });
-
+    res.status(200).json({ booking });
   } catch (error) {
-    res.status(500).json({
-      message: "Server error",
-      error: error.message
-    });
+    res.status(500).json({ message: "Server error", error: error.message });
   }
 };
 
-
-// CLOSE BOOKING
-// Worker finishes the basic job
-export const closeBooking = async (req, res) => {
+// UPDATE BOOKING STATUS
+// worker:   pending -> accepted | rejected,  accepted -> completed
+// customer: pending | accepted -> cancelled
+export const updateBookingStatus = async (req, res) => {
   try {
-    const workerId = req.user.userId;
+    const userId = req.user.userId;
+    const { status } = req.body;
+
+    if (!isValidId(req.params.id)) {
+      return res.status(400).json({ message: "Invalid booking id" });
+    }
 
     const booking = await Booking.findById(req.params.id);
+    if (!booking) return res.status(404).json({ message: "Booking not found" });
 
-    if (!booking) {
-      return res.status(404).json({
-        message: "Booking not found"
-      });
-    }
+    let actor = null;
+    if (booking.worker.toString() === userId) actor = "worker";
+    else if (booking.customer.toString() === userId) actor = "customer";
+    else return res.status(403).json({ message: "You are not part of this booking" });
 
-    // Make sure this worker owns the booking
-    if (booking.worker.toString() !== workerId) {
-      return res.status(403).json({
-        message: "You are not the worker for this booking"
-      });
-    }
-
-    // Already closed
-    if (booking.status === "closed") {
+    const allowed = transitions[actor][booking.status] || [];
+    if (!allowed.includes(status)) {
       return res.status(400).json({
-        message: "Booking is already closed"
+        message: `A ${actor} cannot change a ${booking.status} booking to ${status}`,
       });
     }
 
-    // Close booking
-    booking.status = "closed";
-
+    booking.status = status;
     await booking.save();
 
-    // Worker becomes available
-    const worker = await User.findById(workerId);
-
-    if (worker) {
-      worker.availability = true;
-      await worker.save();
-    }
-
-    res.status(200).json({
-      message: "Booking closed successfully",
-      booking
-    });
-
+    res.status(200).json({ message: `Booking ${status}`, booking });
   } catch (error) {
-    res.status(500).json({
-      message: "Server error",
-      error: error.message
-    });
+    res.status(500).json({ message: "Server error", error: error.message });
   }
 };
