@@ -4,6 +4,19 @@ import User from "../models/userModel.js";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 
+const SESSION_COOKIE = "rural_company_session";
+const sessionCookieValue = (token, clear = false) => {
+  const sameSiteValue = (process.env.COOKIE_SAME_SITE || "lax").toLowerCase();
+  const sameSite = ["strict", "lax", "none"].includes(sameSiteValue) ? sameSiteValue : "lax";
+  const secure = process.env.COOKIE_SECURE === "true" || process.env.NODE_ENV === "production" || sameSite === "none";
+  return [
+    `${SESSION_COOKIE}=${clear ? "" : encodeURIComponent(token)}`,
+    "Path=/", "HttpOnly", `SameSite=${sameSite.charAt(0).toUpperCase()}${sameSite.slice(1)}`,
+    `Max-Age=${clear ? 0 : 30 * 24 * 60 * 60}`,
+    ...(secure ? ["Secure"] : []),
+  ].join("; ");
+};
+
 const publicUser = (user) => ({
   _id: user._id,
   id: user._id,
@@ -143,6 +156,8 @@ export const loginUser = async (req, res) => {
       { expiresIn: "30d" }
     );
 
+    res.setHeader("Set-Cookie", sessionCookieValue(token));
+
     res.status(200).json({
       message: "Login successful",
       token,
@@ -151,6 +166,12 @@ export const loginUser = async (req, res) => {
   } catch (error) {
     return handleError(res, error);
   }
+};
+
+// Clear the browser session cookie. Bearer-token API clients can ignore this route.
+export const logoutUser = (req, res) => {
+  res.setHeader("Set-Cookie", sessionCookieValue("", true));
+  res.status(200).json({ message: "Signed out" });
 };
 
 // GET LOGGED-IN USER (frontend calls this on page refresh)

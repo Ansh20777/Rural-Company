@@ -42,7 +42,7 @@ export default function ProfilePage({ profile, worker, onSave, editable = false,
     finally { setSaving(false); }
   };
   const initials = profile.initials || profile.name?.split(/\s+/).map((part) => part[0]).join('').slice(0, 2).toUpperCase() || 'UC';
-  const address = [profile.address, profile.location?.district, profile.location?.state, profile.pinCode].filter(Boolean).join(' · ');
+  const address = [profile.address, profile.location?.village, profile.location?.district, profile.location?.state, profile.pinCode].filter(Boolean).join(' · ');
   return <section className="profile-page">
     <div className="profile-page-heading"><div><span className="panel-kicker">YOUR ACCOUNT</span><h1>My profile</h1><p>Keep your details current so your community knows who they’re connecting with.</p></div><span className="profile-demo-tag">{editable ? 'PROFILE' : 'PREVIEW'}</span></div>
     <form onSubmit={save}>
@@ -58,6 +58,7 @@ export default function ProfilePage({ profile, worker, onSave, editable = false,
             <Detail icon={Mail} label="Email address" value={profile.email}/>
             <label className="profile-edit-field"><span><Phone size={17}/> Contact number</span><input value={draft.phone || ''} onChange={update('phone')} type="tel"/></label>
             <label className="profile-edit-field"><span><MapPin size={17}/> Home address</span><input value={draft.address || ''} onChange={update('address')} placeholder="House, street and village"/></label>
+            <label className="profile-edit-field"><span><MapPin size={17}/> Village / town</span><input value={draft.location?.village || ''} onChange={updateLocation('village')} placeholder="Your village or town"/></label>
             <label className="profile-edit-field"><span><MapPin size={17}/> District</span><input value={draft.location?.district || ''} onChange={updateLocation('district')}/></label>
             <label className="profile-edit-field"><span><MapPin size={17}/> State</span><input value={draft.location?.state || ''} onChange={updateLocation('state')}/></label>
             <label className="profile-edit-field"><span><MapPin size={17}/> PIN code</span><input value={draft.pinCode || ''} onChange={update('pinCode')} inputMode="numeric" maxLength="6" pattern="[0-9]{6}"/></label>
@@ -71,6 +72,7 @@ export default function ProfilePage({ profile, worker, onSave, editable = false,
           <label className="profile-edit-field"><span><IndianRupeeIcon/> Expected rate</span><input type="number" min="0" value={draft.expectedRate ?? ''} onChange={update('expectedRate')}/></label>
           <label className="profile-edit-field"><span>Rate unit</span><select value={draft.rateUnit || 'day'} onChange={update('rateUnit')}><option value="hour">Per hour</option><option value="day">Per day</option><option value="month">Per month</option></select></label>
           <label className="profile-edit-field"><span>Skills (comma-separated)</span><input value={(draft.skills || []).join(', ')} onChange={(event) => setDraft((current) => ({ ...current, skills: event.target.value.split(',').map((skill) => skill.trim()).filter(Boolean) }))}/></label>
+          <fieldset className="work-types-field"><legend>Work types you accept</legend>{[['hourly', 'Hourly'], ['contract', 'Fixed contract'], ['part-time', 'Part-time'], ['full-time', 'Full-time']].map(([value, label]) => <label key={value}><input type="checkbox" checked={(draft.workTypes || []).includes(value)} onChange={(event) => setDraft((current) => ({ ...current, workTypes: event.target.checked ? [...new Set([...(current.workTypes || []), value])] : (current.workTypes || []).filter((type) => type !== value) }))}/>{label}</label>)}</fieldset>
           <label className="profile-edit-field"><span>About your work</span><textarea value={draft.bio || ''} onChange={update('bio')} maxLength="500"/></label>
         </> : <>
           <div className="profile-extra"><span><BriefcaseBusiness size={16}/> Profession</span><strong>{profile.profession || 'Add your profession'}</strong></div><div className="profile-extra"><span><CalendarDays size={16}/> Experience</span><strong>{profile.experience ? `${profile.experience} years` : 'Add your experience'}</strong></div><div className="profile-extra"><span><Star size={16} fill="currentColor"/> Rating</span><strong>{profile.rating || 0} <small>out of 5 · {profile.reviewCount || 0} reviews</small></strong></div>

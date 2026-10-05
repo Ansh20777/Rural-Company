@@ -1,14 +1,15 @@
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '';
-const TOKEN_KEY = 'rural-company-token';
+const SESSION_KEY = 'rural-company-session';
 
-// localStorage can throw (private mode, blocked storage) - never let that crash the app
-export const getToken = () => { try { return window.localStorage.getItem(TOKEN_KEY); } catch { return null; } };
-export const saveToken = (token) => { try { window.localStorage.setItem(TOKEN_KEY, token); } catch { /* ignore */ } };
-export const clearToken = () => { try { window.localStorage.removeItem(TOKEN_KEY); } catch { /* ignore */ } };
+// The JWT stays in the HttpOnly server cookie. This non-sensitive marker only lets the UI
+// know whether it should try restoring a session after reload.
+export const hasSession = () => { try { return window.localStorage.getItem(SESSION_KEY) === '1'; } catch { return false; } };
+export const saveToken = () => { try { window.localStorage.setItem(SESSION_KEY, '1'); } catch { /* ignore */ } };
+export const clearToken = () => { try { window.localStorage.removeItem(SESSION_KEY); } catch { /* ignore */ } };
 
 export const AUTH_EXPIRED_EVENT = 'rural-company-auth-expired';
 
-export async function apiRequest(path, { method = 'GET', body, token = getToken(), headers = {}, notifyExpired = true } = {}) {
+export async function apiRequest(path, { method = 'GET', body, token = null, headers = {}, notifyExpired = true } = {}) {
   const requestHeaders = { ...headers };
   const isForm = typeof FormData !== 'undefined' && body instanceof FormData;
   if (body !== undefined && !isForm) requestHeaders['Content-Type'] = 'application/json';
@@ -19,6 +20,7 @@ export async function apiRequest(path, { method = 'GET', body, token = getToken(
     response = await fetch(`${API_BASE_URL}${path}`, {
       method,
       headers: requestHeaders,
+      credentials: 'include',
       body: body === undefined ? undefined : isForm ? body : JSON.stringify(body),
     });
   } catch {
@@ -28,7 +30,7 @@ export async function apiRequest(path, { method = 'GET', body, token = getToken(
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) {
     // A rejected token on a logged-in request means the session expired
-    if (response.status === 401 && token) {
+    if (response.status === 401 && (token || (hasSession() && path !== '/api/user/login'))) {
       clearToken();
       if (notifyExpired) window.dispatchEvent(new Event(AUTH_EXPIRED_EVENT));
     }
@@ -54,11 +56,14 @@ export const unitLabel = (unit) => (unit === 'total' ? 'total payment' : `per ${
 export const RADIUS_OPTIONS = ['10', '20', '30', '50', '100'];
 export const formatDistance = (km) => (km === undefined || km === null ? '' : km < 1 ? 'under 1 km' : `${Math.round(km)} km`);
 // radius === 'any' (or no PIN) means "do not filter by distance"
-export const buildSearchParams = ({ q = '', place = '', pin = '', radius = '30', limit } = {}) => {
+export const buildSearchParams = ({ q = '', place = '', pin = '', radius = '30', limit, filters = {} } = {}) => {
   const params = new URLSearchParams();
   if (q.trim()) params.set('q', q.trim());
-  if (place.trim()) params.set('district', place.trim());
+  if (place.trim()) params.set('place', place.trim());
   if (pin.trim() && radius !== 'any') { params.set('pinCode', pin.trim()); params.set('radiusKm', radius); }
+  Object.entries(filters).forEach(([key, value]) => {
+    if (value !== undefined && value !== null && String(value).trim() !== '') params.set(key, String(value));
+  });
   if (limit) params.set('limit', String(limit));
   return params;
 };

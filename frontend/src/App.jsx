@@ -4,9 +4,9 @@ import LandingPage from './pages/LandingPage.jsx';
 import SignupPage from './pages/SignupPage.jsx';
 import LoginPage from './pages/LoginPage.jsx';
 import DashboardPage from './pages/DashboardPage.jsx';
-import { AUTH_EXPIRED_EVENT, apiRequest, buildSearchParams, clearToken, formatDistance, formatMoney, getToken, saveToken, unitLabel } from './lib/api.js';
+import { AUTH_EXPIRED_EVENT, apiRequest, buildSearchParams, clearToken, formatDistance, formatMoney, hasSession, saveToken, unitLabel } from './lib/api.js';
 
-const emptyForm = { name: '', age: '', email: '', phone: '', password: '', profession: '', experience: '', address: '', district: '', state: '', pinCode: '', profilePhoto: '' };
+const emptyForm = { name: '', age: '', email: '', phone: '', password: '', profession: '', experience: '', address: '', village: '', district: '', state: '', pinCode: '', profilePhoto: '' };
 const TONES = ['sage', 'rose', 'gold'];
 const LANG_KEY = 'rural-company-lang';
 const SCREEN_PATHS = { home: '/', login: '/login', signup: '/signup', dashboard: '/dashboard' };
@@ -24,11 +24,12 @@ export default function App() {
   const [role, setRole] = useState('worker');
   const [form, setForm] = useState(emptyForm);
   const [user, setUser] = useState(null);
-  const [booting, setBooting] = useState(() => Boolean(getToken()));   // true while a saved session is being restored
+  const [booting, setBooting] = useState(() => hasSession());   // true while a saved session is being restored
   const [busy, setBusy] = useState(false);                              // login / signup in flight
   const [searching, setSearching] = useState(false);
   const [query, setQuery] = useState('');
   const [location, setLocation] = useState('');
+  const [searchFilters, setSearchFilters] = useState({ profession: '', minRate: '', maxRate: '', minExperience: '', maxExperience: '', available: '', workType: '', jobType: '', minPay: '', maxPay: '' });
   const [pinInput, setPin] = useState(null);       // null = untouched, so the signed-in user's own PIN code is used
   const [radius, setRadius] = useState('30');       // km, or 'any'
   const [geoNote, setGeoNote] = useState(null);     // what the last distance search actually covered
@@ -75,7 +76,7 @@ export default function App() {
 
   // ---- restore a saved session on page load ----
   useEffect(() => {
-    if (!getToken()) return;
+    if (!hasSession()) return;
     apiRequest('/api/user/me', { notifyExpired: false })
       .then(({ user: current }) => { setUser(current); setRole(current.role); if (window.location.pathname === '/login' || window.location.pathname === '/signup') navigate('dashboard', { replace: true }); })
       .catch(() => { clearToken(); })
@@ -106,8 +107,8 @@ export default function App() {
   const activeScreen = dashboardBlocked ? 'login' : alreadySignedIn ? 'dashboard' : screen;
 
   // ---- public discovery ----
-  const fetchListings = useCallback(async (q, place, pin = '', km = '30') => {
-    const params = buildSearchParams({ q, place, pin, radius: km });
+  const fetchListings = useCallback(async (q, place, pin = '', km = '30', filters = {}) => {
+    const params = buildSearchParams({ q, place, pin, radius: km, filters });
     const [workerData, jobData] = await Promise.all([
       apiRequest(`/api/workers?${params.toString()}`, { token: null }),
       apiRequest(`/api/jobs?${params.toString()}`, { token: null }),
@@ -138,8 +139,11 @@ export default function App() {
 
   const search = async () => {
     setSearching(true);
-    const pin = pinInput ?? ownPin;
-    try { applyListings(await fetchListings(query, location, pin, radius), Boolean(query.trim() || location.trim() || (pin && radius !== 'any'))); }
+    // Typing a place is an explicit area search; don't silently intersect it with the
+    // signed-in user's default PIN radius. A PIN typed into the PIN field still applies.
+    const pin = pinInput ?? (location.trim() ? '' : ownPin);
+    const activeFilters = Object.fromEntries(Object.entries(searchFilters).filter(([, value]) => value !== ''));
+    try { applyListings(await fetchListings(query, location, pin, radius, activeFilters), Boolean(query.trim() || location.trim() || (pin && radius !== 'any') || Object.keys(activeFilters).length)); }
     catch (error) { announce(error.message); }
     finally { setSearching(false); }
   };
@@ -152,7 +156,7 @@ export default function App() {
     try {
       const registered = await apiRequest('/api/user/register', { method: 'POST', token: null, body: {
         name: form.name.trim(), age: Number(form.age), email: form.email.trim(), phone: form.phone.trim(), password: form.password, role,
-        address: form.address.trim(), pinCode: form.pinCode.trim(), location: { village: form.address.trim(), district: form.district.trim(), state: form.state.trim() },
+        address: form.address.trim(), pinCode: form.pinCode.trim(), location: { village: form.village.trim(), district: form.district.trim(), state: form.state.trim() },
         ...(role === 'worker' ? { profession: form.profession, experience: Number(form.experience) } : {}),
       } });
       const result = await apiRequest('/api/user/login', { method: 'POST', token: null, body: { email: form.email.trim(), password: form.password } });
@@ -172,7 +176,7 @@ export default function App() {
     finally { setBusy(false); }
   };
 
-  const signOut = () => { clearToken(); setUser(null); setForm(emptyForm); goHome(); };
+  const signOut = () => { apiRequest('/api/user/logout', { method: 'POST', notifyExpired: false }).catch(() => {}); clearToken(); setUser(null); setForm(emptyForm); goHome(); };
 
   // ---- display models for the landing page ----
   const normalizedPeople = useMemo(() => people.map((person, index) => ({
@@ -196,7 +200,7 @@ export default function App() {
   if (activeScreen === 'signup') return <SignupPage lang={lang} setLang={setLang} role={role} setRole={setRole} form={form} setForm={setForm} onHome={goHome} onSubmit={submitSignup} notice={notice} onLogin={() => openLogin(role)} busy={busy} />;
   if (activeScreen === 'login') return <LoginPage lang={lang} setLang={setLang} form={form} setForm={setForm} onHome={goHome} onSubmit={submitLogin} onSignup={() => openSignup(role)} notice={notice} busy={busy} />;
   if (activeScreen === 'dashboard' && user) return <DashboardPage key={user._id || user.id} lang={lang} setLang={setLang} role={role} user={user} onHome={goHome} intent={intent} onIntentUsed={() => setIntent(null)} onSignOut={signOut} announce={announce} notice={notice} />;
-  return <LandingPage lang={lang} setLang={setLang} t={t} query={query} setQuery={setQuery} location={location} setLocation={setLocation} people={normalizedPeople} jobs={normalizedJobs} stats={totals} searching={searching} pin={pinInput ?? ownPin} setPin={setPin} radius={radius} setRadius={setRadius} geoNote={geoNote} signedIn={Boolean(user)} onDashboard={() => navigate('dashboard')} notice={notice} onSearch={search} onSignup={openSignup} onLogin={() => openLogin('worker')} onContact={(person) => {
+  return <LandingPage lang={lang} setLang={setLang} t={t} query={query} setQuery={setQuery} location={location} setLocation={setLocation} searchFilters={searchFilters} setSearchFilters={setSearchFilters} people={normalizedPeople} jobs={normalizedJobs} stats={totals} searching={searching} pin={pinInput ?? ownPin} setPin={setPin} radius={radius} setRadius={setRadius} geoNote={geoNote} signedIn={Boolean(user)} onDashboard={() => navigate('dashboard')} notice={notice} onSearch={search} onSignup={openSignup} onLogin={() => openLogin('worker')} onContact={(person) => {
     if (!user) { announce('Please sign in as a customer to contact workers.'); openLogin('customer'); return; }
     if (user.role !== 'customer') { announce('You are signed in as a worker. Only customer accounts can hire workers.'); return; }
     setIntent({ type: 'booking', item: person }); navigate('dashboard');

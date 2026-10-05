@@ -1,19 +1,27 @@
 import jwt from "jsonwebtoken";
 
+const sessionCookie = "rural_company_session";
+
+const readCookie = (header, name) => {
+  const entry = String(header || "").split(";").map((part) => part.trim()).find((part) => part.startsWith(`${name}=`));
+  return entry ? decodeURIComponent(entry.slice(name.length + 1)) : null;
+};
+
 const authMiddleware = (req, res, next) => {
   try {
     // Get token from Authorization header
-    const authHeader = req.headers.authorization;
+    const authHeader = req.headers.authorization || "";
+    const token = authHeader.startsWith("Bearer ")
+      ? authHeader.slice(7)
+      : readCookie(req.headers.cookie, sessionCookie);
 
-    if (!authHeader || !authHeader.startsWith("Bearer ")) {
+    if (!token) {
       return res.status(401).json({
         message: "Authentication required",
       });
     }
 
     // Extract token
-    const token = authHeader.split(" ")[1];
-
     // Verify token
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
 

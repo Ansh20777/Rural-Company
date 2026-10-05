@@ -82,7 +82,7 @@ export const getWorkerById = async (req, res) => {
 // /api/workers?profession=&skill=&district=&state=&available=true&minRate=&maxRate=&minExperience=&workType=&page=&limit=
 export const getWorkers = async (req, res) => {
   try {
-    const { profession, skill, district, state, available, minRate, maxRate, minExperience, workType } = req.query;
+    const { profession, skill, district, state, place, available, minRate, maxRate, minExperience, workType } = req.query;
     const { page, limit, skip } = getPagination(req.query);
 
     const filter = { role: "worker" };
@@ -91,6 +91,12 @@ export const getWorkers = async (req, res) => {
     if (skill) filter.skills = { $regex: escapeRegex(skill), $options: "i" };
     if (district) filter["location.district"] = { $regex: escapeRegex(district), $options: "i" };
     if (state) filter["location.state"] = { $regex: escapeRegex(state), $options: "i" };
+    if (place) {
+      const pattern = { $regex: escapeRegex(place), $options: "i" };
+      filter.$and = [...(filter.$and || []), { $or: [
+        { "location.village": pattern }, { "location.district": pattern }, { "location.state": pattern },
+      ] }];
+    }
     if (available !== undefined) filter.availability = available === "true";
     if (workType) filter.workTypes = workType;
 

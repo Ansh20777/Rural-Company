@@ -42,7 +42,7 @@ export const createJob = async (req, res) => {
 // /api/jobs?q=&profession=&district=&state=&jobType=&minPay=&maxPay=&status=open&page=&limit=
 export const getJobs = async (req, res) => {
   try {
-    const { q, profession, district, state, jobType, minPay, maxPay } = req.query;
+    const { q, profession, district, state, place, jobType, minPay, maxPay } = req.query;
     const { page, limit, skip } = getPagination(req.query);
 
     const filter = { status: "open" };
@@ -54,6 +54,12 @@ export const getJobs = async (req, res) => {
     if (profession) filter.profession = { $regex: escapeRegex(profession), $options: "i" };
     if (district) filter["location.district"] = { $regex: escapeRegex(district), $options: "i" };
     if (state) filter["location.state"] = { $regex: escapeRegex(state), $options: "i" };
+    if (place) {
+      const placePattern = { $regex: escapeRegex(place), $options: "i" };
+      filter.$and = [...(filter.$and || []), { $or: [
+        { "location.village": placePattern }, { "location.district": placePattern }, { "location.state": placePattern },
+      ] }];
+    }
     if (jobType) filter.jobType = jobType;
 
     const minPayN = toNumber(minPay);

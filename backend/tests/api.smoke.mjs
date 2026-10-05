@@ -5,13 +5,13 @@ const API = process.env.API || 'http://localhost:5000';
 const run = Date.now().toString(36);
 let passed = 0; let failed = 0;
 
-const call = async (path, { method = 'GET', body, token } = {}) => {
+const call = async (path, { method = 'GET', body, token, cookie } = {}) => {
   const res = await fetch(API + path, {
     method,
-    headers: { ...(body ? { 'Content-Type': 'application/json' } : {}), ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+    headers: { ...(body ? { 'Content-Type': 'application/json' } : {}), ...(token ? { Authorization: `Bearer ${token}` } : {}), ...(cookie ? { Cookie: cookie } : {}) },
     body: body ? JSON.stringify(body) : undefined,
   });
-  return { status: res.status, data: await res.json().catch(() => ({})) };
+  return { status: res.status, data: await res.json().catch(() => ({})), setCookie: res.headers.get('set-cookie') || '' };
 };
 const check = (name, condition, extra = '') => {
   if (condition) { passed++; console.log(`  ok   ${name}`); } else { failed++; console.log(`  FAIL ${name} ${extra}`); }
@@ -38,6 +38,14 @@ await register('Carl Customer', 'customer');
 const worker3 = await login('Walt Worker3');
 const worker = await login('Wanda Worker'); const worker2 = await login('Wally Worker2'); const customer = await login('Carl Customer');
 check('login returns token and both _id and id', !!worker.token && !!worker.user?._id && !!worker.user?.id);
+const cookieLogin = await fetch(API + '/api/user/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: `wandaworker.${run}@example.info`, password: 'secret123' }) });
+const cookieHeader = cookieLogin.headers.get('set-cookie') || '';
+check('browser login sets an HttpOnly SameSite cookie', /rural_company_session=/.test(cookieHeader) && /HttpOnly/i.test(cookieHeader) && /SameSite=Lax/i.test(cookieHeader));
+const cookiePair = cookieHeader.split(';')[0];
+r = await call('/api/user/me', { cookie: cookiePair });
+check('authenticated account can be restored from the cookie', r.status === 200 && r.data.user?.email === `wandaworker.${run}@example.info`);
+r = await call('/api/user/logout', { method: 'POST' });
+check('logout clears the HttpOnly session cookie', /rural_company_session=/.test(r.setCookie) && /Max-Age=0/i.test(r.setCookie));
 r = await call('/api/user/login', { method: 'POST', body: { email: 'nobody@example.com', password: 'x' } });
 check('bad login -> 401', r.status === 401);
 r = await call('/api/user/me', { token: 'garbage' });
@@ -48,6 +56,10 @@ r = await call(`/api/workers?district=${loc.district}&minRate=abc&maxExperience=
 check('junk numeric filters do not crash (200)', r.status === 200, String(r.status));
 check('worker search lists registered workers', r.data.workers?.length === 3);
 check('public worker list hides phone and email', r.data.workers.every((w) => w.phone === undefined && w.email === undefined));
+r = await call(`/api/workers?place=${encodeURIComponent(loc.village)}`);
+check('place search matches worker village', r.status === 200 && r.data.workers?.length === 3, JSON.stringify(r.data));
+r = await call(`/api/workers?place=${encodeURIComponent(loc.state)}`);
+check('place search matches worker state', r.status === 200 && r.data.workers?.length === 3, JSON.stringify(r.data));
 const workerId = worker.user._id;
 r = await call(`/api/workers/${workerId}`);
 check('public worker detail hides phone', r.status === 200 && r.data.worker.phone === undefined);
@@ -92,6 +104,10 @@ console.log('Long jobs (post & apply)');
 r = await call('/api/jobs', { method: 'POST', token: customer.token, body: { title: `Build shed ${run}`, description: 'Wood shed', profession: 'Carpenter', location: loc, jobType: 'contract', payment: 5000, paymentUnit: 'total', positions: 1 } });
 check('customer posts job', r.status === 201, JSON.stringify(r.data));
 const jobId = r.data.job?._id;
+r = await call(`/api/jobs?place=${encodeURIComponent(loc.village)}`);
+check('place search matches job village', r.status === 200 && r.data.jobs?.some((job) => job._id === jobId));
+r = await call(`/api/jobs?place=${encodeURIComponent(loc.state)}`);
+check('place search matches job state', r.status === 200 && r.data.jobs?.some((job) => job._id === jobId));
 r = await call('/api/jobs', { method: 'POST', token: customer.token, body: { title: 'x', description: 'y', profession: 'z', location: { village: 'v' }, jobType: 'contract', payment: 1 } });
 check('job without district/state -> 400, not 500', r.status === 400);
 const apps = await Promise.all([call(`/api/jobs/${jobId}/apply`, { method: 'POST', token: worker.token, body: { message: 'Hi' } }), call(`/api/jobs/${jobId}/apply`, { method: 'POST', token: worker2.token, body: { message: 'Hi' } })]);
