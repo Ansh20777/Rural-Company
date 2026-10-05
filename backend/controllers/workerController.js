@@ -1,5 +1,6 @@
+import { geoFromQuery, withinRadius, CANDIDATE_LIMIT } from "../utils/geo.js";
 import User from "../models/userModel.js";
-import { escapeRegex, getPagination } from "../utils/helpers.js";
+import { escapeRegex, getPagination, handleError, isValidId, isValidImageData, toNumber } from "../utils/helpers.js";
 
 // UPDATE WORKER PROFILE
 export const updateWorkerProfile = async (req, res) => {
@@ -9,6 +10,10 @@ export const updateWorkerProfile = async (req, res) => {
     if (!worker) return res.status(404).json({ message: "Worker not found" });
     if (worker.role !== "worker") {
       return res.status(403).json({ message: "Only workers can update worker profile" });
+    }
+
+    if (typeof req.body.profileImage === "string" && !isValidImageData(req.body.profileImage)) {
+      return res.status(400).json({ message: "Profile image must be a PNG, JPG, WEBP or GIF under 5 MB" });
     }
 
     const fields = [
@@ -22,6 +27,9 @@ export const updateWorkerProfile = async (req, res) => {
 
     // Profile image uploaded using Multer
     if (req.file) {
+      if (!/^image\/(png|jpe?g|webp|gif)$/.test(req.file.mimetype)) {
+        return res.status(400).json({ message: "Profile image must be a PNG, JPG, WEBP or GIF" });
+      }
       worker.profileImage = `data:${req.file.mimetype};base64,${req.file.buffer.toString("base64")}`;
     } else if (typeof req.body.profileImage === "string") {
       worker.profileImage = req.body.profileImage;
@@ -34,7 +42,7 @@ export const updateWorkerProfile = async (req, res) => {
 
     res.status(200).json({ message: "Worker profile updated successfully", worker: workerData });
   } catch (error) {
-    res.status(500).json({ message: "Server error", error: error.message });
+    return handleError(res, error);
   }
 };
 
@@ -50,20 +58,23 @@ export const getMyWorkerProfile = async (req, res) => {
 
     res.status(200).json({ worker });
   } catch (error) {
-    res.status(500).json({ message: "Server error", error: error.message });
+    return handleError(res, error);
   }
 };
 
-// GET WORKER BY ID (public - hides email)
+// GET WORKER BY ID (public - hides email and phone)
 export const getWorkerById = async (req, res) => {
   try {
-    const worker = await User.findOne({ _id: req.params.id, role: "worker" }).select("-password -email");
+    if (!isValidId(req.params.id)) return res.status(400).json({ message: "Invalid worker id" });
+
+    // Phone is private until a booking is accepted
+    const worker = await User.findOne({ _id: req.params.id, role: "worker" }).select("-password -email -phone");
 
     if (!worker) return res.status(404).json({ message: "Worker not found" });
 
     res.status(200).json({ worker });
   } catch (error) {
-    res.status(500).json({ message: "Server error", error: error.message });
+    return handleError(res, error);
   }
 };
 
@@ -83,18 +94,23 @@ export const getWorkers = async (req, res) => {
     if (available !== undefined) filter.availability = available === "true";
     if (workType) filter.workTypes = workType;
 
-    if (minRate || maxRate) {
+    const minRateN = toNumber(minRate);
+    const maxRateN = toNumber(maxRate);
+    if (minRateN !== undefined || maxRateN !== undefined) {
       filter.expectedRate = {};
-      if (minRate) filter.expectedRate.$gte = Number(minRate);
-      if (maxRate) filter.expectedRate.$lte = Number(maxRate);
+      if (minRateN !== undefined) filter.expectedRate.$gte = minRateN;
+      if (maxRateN !== undefined) filter.expectedRate.$lte = maxRateN;
     }
 
-    if (minExperience) filter.experience = { $gte: Number(minExperience) };
-
-    if (req.query.maxExperience) {
-      filter.experience = { ...(filter.experience || {}), $lte: Number(req.query.maxExperience) };
+    const minExp = toNumber(minExperience);
+    const maxExp = toNumber(req.query.maxExperience);
+    if (minExp !== undefined || maxExp !== undefined) {
+      filter.experience = {};
+      if (minExp !== undefined) filter.experience.$gte = minExp;
+      if (maxExp !== undefined) filter.experience.$lte = maxExp;
     }
-    if (req.query.rateUnit) filter.rateUnit = req.query.rateUnit;
+
+    if (["hour", "day", "month"].includes(req.query.rateUnit)) filter.rateUnit = req.query.rateUnit;
     if (req.query.q) {
       const pattern = { $regex: escapeRegex(req.query.q), $options: "i" };
       filter.$and = [
@@ -103,9 +119,28 @@ export const getWorkers = async (req, res) => {
       ];
     }
 
+    // Distance search: ?pinCode=781001&radiusKm=30 -> only workers within the radius, nearest first
+    const geo = geoFromQuery(req.query);
+    if (geo.error) return res.status(400).json({ message: geo.error });
+
+    if (geo.active) {
+      const candidates = await User.find(filter).select("-password -email -phone").sort({ rating: -1, reviewCount: -1 }).limit(CANDIDATE_LIMIT);
+      const { found, skippedUnknownPin } = withinRadius(candidates, geo, (w) => w.pinCode);
+      found.sort((x, y) => x.distanceKm - y.distanceKm); // stable: ties keep the rating order from the query
+      const workers = found.slice(skip, skip + limit);
+      return res.status(200).json({
+        count: workers.length,
+        total: found.length,
+        page,
+        pages: Math.ceil(found.length / limit),
+        workers,
+        geo: { pinCode: geo.pin, radiusKm: geo.radiusKm, skippedUnknownPin },
+      });
+    }
+
     const [workers, total] = await Promise.all([
       User.find(filter)
-        .select("-password -email")
+        .select("-password -email -phone")
         .sort({ rating: -1, reviewCount: -1 })
         .skip(skip)
         .limit(limit),
@@ -120,7 +155,7 @@ export const getWorkers = async (req, res) => {
       workers,
     });
   } catch (error) {
-    res.status(500).json({ message: "Server error", error: error.message });
+    return handleError(res, error);
   }
 };
 
@@ -144,6 +179,6 @@ export const updateAvailability = async (req, res) => {
 
     res.status(200).json({ message: "Availability updated successfully", availability: worker.availability });
   } catch (error) {
-    res.status(500).json({ message: "Server error", error: error.message });
+    return handleError(res, error);
   }
 };

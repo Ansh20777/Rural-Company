@@ -10,14 +10,14 @@ const userSchema = new mongoose.Schema(
       lowercase: true,
       trim: true,
       match: [
-        /^\w+([\.-]?\w+)*@\w+([\.-]?\w+)*(\.\w{2,3})+$/,
+        /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/,
         "Please enter a valid email address",
       ],
     },
+    // Stored as a bcrypt hash; the 6-character minimum is enforced in the controller before hashing
     password: {
       type: String,
       required: [true, "Password is required"],
-      minlength: [6, "Password must be at least 6 characters long"],
     },
     age: { type: Number, min: 18, max: 100 },
     role: {

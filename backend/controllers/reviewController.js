@@ -3,7 +3,7 @@ import Booking from "../models/bookingModel.js";
 import Job from "../models/jobModel.js";
 import Application from "../models/applicationModel.js";
 import User from "../models/userModel.js";
-import { isValidId } from "../utils/helpers.js";
+import { isValidId, handleError } from "../utils/helpers.js";
 
 // Recalculate the worker's average rating
 const updateWorkerRating = async (workerId) => {
@@ -23,7 +23,7 @@ export const createReview = async (req, res) => {
     const customerId = req.user.userId;
     const { bookingId, jobId, workerId, rating, comment } = req.body;
 
-    const numericRating = Number(rating);
+    const numericRating = typeof rating === "number" || (typeof rating === "string" && rating.trim() !== "") ? Number(rating) : NaN;
     if (!Number.isFinite(numericRating) || numericRating < 1 || numericRating > 5) {
       return res.status(400).json({ message: "Rating must be between 1 and 5" });
     }
@@ -47,7 +47,7 @@ export const createReview = async (req, res) => {
         return res.status(400).json({ message: "You can review only after the booking is completed" });
       }
       if (await Review.findOne({ booking: bookingId })) {
-        return res.status(400).json({ message: "You have already reviewed this booking" });
+        return res.status(409).json({ message: "You have already reviewed this booking" });
       }
 
       reviewData = { booking: bookingId, worker: booking.worker };
@@ -72,7 +72,7 @@ export const createReview = async (req, res) => {
         return res.status(400).json({ message: "This worker was not hired for this job" });
       }
       if (await Review.findOne({ job: jobId, worker: workerId })) {
-        return res.status(400).json({ message: "You have already reviewed this worker for this job" });
+        return res.status(409).json({ message: "You have already reviewed this worker for this job" });
       }
 
       reviewData = { job: jobId, worker: workerId };
@@ -87,7 +87,7 @@ export const createReview = async (req, res) => {
     if (error.name === "ValidationError" || error.name === "CastError") {
       return res.status(400).json({ message: error.message });
     }
-    res.status(500).json({ message: "Server error", error: error.message });
+    return handleError(res, error);
   }
 };
 
@@ -104,6 +104,6 @@ export const getWorkerReviews = async (req, res) => {
 
     res.status(200).json({ count: reviews.length, reviews });
   } catch (error) {
-    res.status(500).json({ message: "Server error", error: error.message });
+    return handleError(res, error);
   }
 };

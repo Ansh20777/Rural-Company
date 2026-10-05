@@ -1,24 +1,31 @@
+import jwt from "jsonwebtoken";
+import { geoFromQuery, withinRadius, CANDIDATE_LIMIT } from "../utils/geo.js";
+import User from "../models/userModel.js";
 import Job from "../models/jobModel.js";
 import Application from "../models/applicationModel.js";
-import { escapeRegex, getPagination, isValidId } from "../utils/helpers.js";
+import { escapeRegex, getPagination, isValidId, handleError, toNumber } from "../utils/helpers.js";
 
 // CREATE JOB (customer only)
 export const createJob = async (req, res) => {
   try {
     const {
       title, description, profession, skills, location, jobType,
-      duration, workingHours, startDate, positions, payment, paymentUnit,
+      duration, workingHours, startDate, positions, payment, paymentUnit, pinCode,
     } = req.body;
 
-    if (!title || !description || !profession || !location || !jobType || payment === undefined) {
+    if (!title || !description || !profession || !location || !jobType || payment === undefined || payment === "") {
       return res.status(400).json({
         message: "Title, description, profession, location, jobType and payment are required",
       });
     }
 
+    // The job's PIN code (for distance search) defaults to the poster's own PIN code
+    let jobPin = typeof pinCode === "string" && pinCode.trim() ? pinCode.trim() : undefined;
+    if (!jobPin) jobPin = (await User.findById(req.user.userId).select("pinCode"))?.pinCode || undefined;
+
     const job = await Job.create({
       title, description, profession, skills, location, jobType,
-      duration, workingHours, startDate, positions, payment, paymentUnit,
+      duration, workingHours, startDate, positions, payment, paymentUnit, pinCode: jobPin,
       customer: req.user.userId,
     });
 
@@ -27,7 +34,7 @@ export const createJob = async (req, res) => {
     if (error.name === "ValidationError") {
       return res.status(400).json({ message: error.message });
     }
-    res.status(500).json({ message: "Server error", error: error.message });
+    return handleError(res, error);
   }
 };
 
@@ -49,10 +56,31 @@ export const getJobs = async (req, res) => {
     if (state) filter["location.state"] = { $regex: escapeRegex(state), $options: "i" };
     if (jobType) filter.jobType = jobType;
 
-    if (minPay || maxPay) {
+    const minPayN = toNumber(minPay);
+    const maxPayN = toNumber(maxPay);
+    if (minPayN !== undefined || maxPayN !== undefined) {
       filter.payment = {};
-      if (minPay) filter.payment.$gte = Number(minPay);
-      if (maxPay) filter.payment.$lte = Number(maxPay);
+      if (minPayN !== undefined) filter.payment.$gte = minPayN;
+      if (maxPayN !== undefined) filter.payment.$lte = maxPayN;
+    }
+
+    // Distance search: ?pinCode=781001&radiusKm=30 -> only jobs within the radius, nearest first
+    const geo = geoFromQuery(req.query);
+    if (geo.error) return res.status(400).json({ message: geo.error });
+
+    if (geo.active) {
+      const candidates = await Job.find(filter).populate("customer", "name location pinCode").sort({ createdAt: -1 }).limit(CANDIDATE_LIMIT);
+      const { found, skippedUnknownPin } = withinRadius(candidates, geo, (j) => j.pinCode || j.customer?.pinCode);
+      found.sort((x, y) => x.distanceKm - y.distanceKm);
+      const jobs = found.slice(skip, skip + limit);
+      return res.status(200).json({
+        count: jobs.length,
+        total: found.length,
+        page,
+        pages: Math.ceil(found.length / limit),
+        jobs,
+        geo: { pinCode: geo.pin, radiusKm: geo.radiusKm, skippedUnknownPin },
+      });
     }
 
     const [jobs, total] = await Promise.all([
@@ -72,7 +100,7 @@ export const getJobs = async (req, res) => {
       jobs,
     });
   } catch (error) {
-    res.status(500).json({ message: "Server error", error: error.message });
+    return handleError(res, error);
   }
 };
 
@@ -94,7 +122,7 @@ export const getMyJobs = async (req, res) => {
 
     res.status(200).json({ count: result.length, jobs: result });
   } catch (error) {
-    res.status(500).json({ message: "Server error", error: error.message });
+    return handleError(res, error);
   }
 };
 
@@ -108,9 +136,21 @@ export const getJobById = async (req, res) => {
     const job = await Job.findById(req.params.id).populate("customer", "name location");
     if (!job) return res.status(404).json({ message: "Job not found" });
 
+    // Non-open jobs are visible only to their owner
+    if (job.status !== "open") {
+      let viewerId = null;
+      try {
+        const header = req.headers.authorization || "";
+        if (header.startsWith("Bearer ")) viewerId = jwt.verify(header.split(" ")[1], process.env.JWT_SECRET).userId;
+      } catch { /* not logged in */ }
+      if (!viewerId || job.customer?._id?.toString() !== String(viewerId)) {
+        return res.status(404).json({ message: "Job not found" });
+      }
+    }
+
     res.status(200).json({ job });
   } catch (error) {
-    res.status(500).json({ message: "Server error", error: error.message });
+    return handleError(res, error);
   }
 };
 
@@ -124,28 +164,34 @@ export const updateJobStatus = async (req, res) => {
       return res.status(400).json({ message: "Invalid job id" });
     }
 
-    const job = await Job.findById(req.params.id);
-    if (!job) return res.status(404).json({ message: "Job not found" });
+    const existing = await Job.findById(req.params.id);
+    if (!existing) return res.status(404).json({ message: "Job not found" });
 
-    if (job.customer.toString() !== req.user.userId) {
+    if (existing.customer.toString() !== req.user.userId) {
       return res.status(403).json({ message: "You can only update your own jobs" });
     }
 
-    const allowed = { open: ["cancelled"], hired: ["completed", "cancelled"] }[job.status] || [];
-    if (!allowed.includes(status)) {
-      return res.status(400).json({ message: `Cannot change a ${job.status} job to ${status}` });
+    const transitions = { open: ["cancelled"], hired: ["completed", "cancelled"] };
+    const fromStatuses = Object.keys(transitions).filter((from) => transitions[from].includes(status));
+    if (!fromStatuses.includes(existing.status)) {
+      return res.status(400).json({ message: `Cannot change a ${existing.status} job to ${status}` });
     }
 
-    job.status = status;
-    await job.save();
+    // Atomic: only succeeds if the job is still in the status we just checked
+    const job = await Job.findOneAndUpdate(
+      { _id: existing._id, customer: req.user.userId, status: existing.status },
+      { status },
+      { returnDocument: "after" }
+    );
+    if (!job) return res.status(409).json({ message: "This job was just updated. Please refresh and try again." });
 
-    // If cancelled, close any pending applications
+    // If cancelled, close any pending applications (idempotent, safe to retry)
     if (status === "cancelled") {
       await Application.updateMany({ job: job._id, status: "pending" }, { status: "rejected" });
     }
 
     res.status(200).json({ message: `Job ${status}`, job });
   } catch (error) {
-    res.status(500).json({ message: "Server error", error: error.message });
+    return handleError(res, error);
   }
 };
