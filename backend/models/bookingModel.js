@@ -23,5 +23,11 @@ const bookingSchema = new mongoose.Schema(
 bookingSchema.index({ customer: 1, createdAt: -1 });
 bookingSchema.index({ worker: 1, status: 1 });
 
+// At most one ACTIVE booking per customer/worker pair (closes the check-then-insert race)
+bookingSchema.index(
+  { customer: 1, worker: 1 },
+  { unique: true, partialFilterExpression: { status: { $in: ["pending", "accepted"] } } }
+);
+
 const Booking = mongoose.model("Booking", bookingSchema);
 export default Booking;

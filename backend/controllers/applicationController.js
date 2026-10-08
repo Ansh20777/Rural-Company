@@ -1,6 +1,6 @@
 import Application from "../models/applicationModel.js";
 import Job from "../models/jobModel.js";
-import { isValidId } from "../utils/helpers.js";
+import { isValidId, handleError } from "../utils/helpers.js";
 
 // APPLY TO A JOB (worker only)
 export const applyToJob = async (req, res) => {
@@ -27,12 +27,12 @@ export const applyToJob = async (req, res) => {
       res.status(201).json({ message: "Application sent", application });
     } catch (err) {
       if (err.code === 11000) {
-        return res.status(400).json({ message: "You have already applied to this job" });
+        return res.status(409).json({ message: "You have already applied to this job" });
       }
       throw err;
     }
   } catch (error) {
-    res.status(500).json({ message: "Server error", error: error.message });
+    return handleError(res, error);
   }
 };
 
@@ -59,7 +59,7 @@ export const getJobApplications = async (req, res) => {
     if (error.name === "ValidationError" || error.name === "CastError") {
       return res.status(400).json({ message: error.message });
     }
-    res.status(500).json({ message: "Server error", error: error.message });
+    return handleError(res, error);
   }
 };
 
@@ -76,48 +76,82 @@ export const updateApplicationStatus = async (req, res) => {
       return res.status(400).json({ message: "Invalid application id" });
     }
 
-    const application = await Application.findById(req.params.id);
-    if (!application) return res.status(404).json({ message: "Application not found" });
+    const existing = await Application.findById(req.params.id);
+    if (!existing) return res.status(404).json({ message: "Application not found" });
 
-    const job = await Job.findById(application.job);
+    const job = await Job.findById(existing.job);
     if (!job) return res.status(404).json({ message: "Job not found" });
 
     if (job.customer.toString() !== req.user.userId) {
       return res.status(403).json({ message: "Only the job owner can do this" });
     }
 
-    if (application.status !== "pending") {
-      return res.status(400).json({ message: `Application is already ${application.status}` });
+    if (existing.status !== "pending") {
+      return res.status(400).json({ message: `Application is already ${existing.status}` });
     }
+
+    let application;
+    let jobStatus = job.status;
 
     if (status === "accepted") {
       if (job.status !== "open") {
         return res.status(400).json({ message: "This job is not open for hiring" });
       }
 
-      const acceptedCountBefore = await Application.countDocuments({ job: job._id, status: "accepted" });
-      if (acceptedCountBefore >= job.positions) {
+      // 1) Atomically claim one free position on the job. Only one concurrent request can win the last slot.
+      const claimed = await Job.findOneAndUpdate(
+        {
+          _id: job._id,
+          status: "open",
+          $or: [{ acceptedCount: { $lt: job.positions } }, { acceptedCount: { $exists: false } }],
+        },
+        { $inc: { acceptedCount: 1 } },
+        { returnDocument: "after" }
+      );
+      if (!claimed) {
+        // Self-heal: if all slots are taken but the job was never flipped to "hired" (e.g. a crash), finish that now
+        await Job.updateOne({ _id: job._id, status: "open", acceptedCount: { $gte: job.positions } }, { status: "hired" });
         return res.status(409).json({ message: "All positions for this job have already been filled" });
       }
 
-      application.status = "accepted";
-      await application.save();
+      // 2) Atomically flip this application pending -> accepted. If someone changed it meanwhile, give the slot back.
+      application = await Application.findOneAndUpdate(
+        { _id: existing._id, status: "pending" },
+        { status: "accepted" },
+        { returnDocument: "after" }
+      );
+      if (!application) {
+        await Job.updateOne({ _id: job._id }, { $inc: { acceptedCount: -1 } });
+        return res.status(409).json({ message: "This application was just updated. Please refresh." });
+      }
 
-      // When all positions are filled -> job is hired and everyone else is rejected
-      const acceptedCount = await Application.countDocuments({ job: job._id, status: "accepted" });
-      if (acceptedCount >= job.positions) {
-        job.status = "hired";
-        await job.save();
+      // Safety net (defence in depth): verify the real number of accepted applicants. On MongoDB the atomic counter above
+      // already guarantees this never trips; it protects against any store where the claim is not fully atomic.
+      const acceptedNow = await Application.countDocuments({ job: job._id, status: "accepted" });
+      if (acceptedNow > job.positions) {
+        await Application.updateOne({ _id: application._id, status: "accepted" }, { status: "pending" });
+        await Job.updateOne({ _id: job._id }, { $inc: { acceptedCount: -1 } });
+        return res.status(409).json({ message: "All positions for this job have already been filled" });
+      }
+
+      // 3) Last position filled -> job becomes hired and everyone still pending is rejected
+      if (claimed.acceptedCount >= claimed.positions) {
+        await Job.updateOne({ _id: job._id, status: "open" }, { status: "hired" });
+        jobStatus = "hired";
         await Application.updateMany({ job: job._id, status: "pending" }, { status: "rejected" });
       }
     } else {
-      application.status = "rejected";
-      await application.save();
+      application = await Application.findOneAndUpdate(
+        { _id: existing._id, status: "pending" },
+        { status: "rejected" },
+        { returnDocument: "after" }
+      );
+      if (!application) return res.status(409).json({ message: "This application was just updated. Please refresh." });
     }
 
-    res.status(200).json({ message: `Application ${status}`, application, jobStatus: job.status });
+    res.status(200).json({ message: `Application ${status}`, application, jobStatus });
   } catch (error) {
-    res.status(500).json({ message: "Server error", error: error.message });
+    return handleError(res, error);
   }
 };
 
@@ -125,7 +159,7 @@ export const updateApplicationStatus = async (req, res) => {
 export const getMyApplications = async (req, res) => {
   try {
     const filter = { worker: req.user.userId };
-    if (req.query.status) filter.status = req.query.status;
+    if (["pending", "accepted", "rejected", "withdrawn"].includes(req.query.status)) filter.status = req.query.status;
 
     const applications = await Application.find(filter)
       .populate({
@@ -144,7 +178,7 @@ export const getMyApplications = async (req, res) => {
 
     res.status(200).json({ count: applications.length, applications });
   } catch (error) {
-    res.status(500).json({ message: "Server error", error: error.message });
+    return handleError(res, error);
   }
 };
 
@@ -155,21 +189,25 @@ export const withdrawApplication = async (req, res) => {
       return res.status(400).json({ message: "Invalid application id" });
     }
 
-    const application = await Application.findById(req.params.id);
-    if (!application) return res.status(404).json({ message: "Application not found" });
+    const existing = await Application.findById(req.params.id);
+    if (!existing) return res.status(404).json({ message: "Application not found" });
 
-    if (application.worker.toString() !== req.user.userId) {
+    if (existing.worker.toString() !== req.user.userId) {
       return res.status(403).json({ message: "This is not your application" });
     }
-    if (application.status !== "pending") {
-      return res.status(400).json({ message: `Cannot withdraw a ${application.status} application` });
+    if (existing.status !== "pending") {
+      return res.status(400).json({ message: `Cannot withdraw a ${existing.status} application` });
     }
 
-    application.status = "withdrawn";
-    await application.save();
+    const application = await Application.findOneAndUpdate(
+      { _id: existing._id, status: "pending" },
+      { status: "withdrawn" },
+      { returnDocument: "after" }
+    );
+    if (!application) return res.status(409).json({ message: "This application was just updated. Please refresh." });
 
     res.status(200).json({ message: "Application withdrawn", application });
   } catch (error) {
-    res.status(500).json({ message: "Server error", error: error.message });
+    return handleError(res, error);
   }
 };

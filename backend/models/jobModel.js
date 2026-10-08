@@ -14,6 +14,8 @@ const jobSchema = new mongoose.Schema(
       district: { type: String, trim: true, required: true },
       state: { type: String, trim: true, required: true },
     },
+    // Where the work is, for distance search. Defaults to the customer's PIN code when the job is posted.
+    pinCode: { type: String, trim: true, match: [/^\d{6}$/, "PIN code must contain 6 digits"] },
     jobType: {
       type: String,
       enum: ["hourly", "contract", "part-time", "full-time"],
@@ -23,6 +25,7 @@ const jobSchema = new mongoose.Schema(
     workingHours: { type: String, trim: true },   // e.g. "9am - 5pm"
     startDate: { type: Date },
     positions: { type: Number, default: 1, min: 1 }, // how many workers needed
+    acceptedCount: { type: Number, default: 0, min: 0 }, // workers hired so far; claimed atomically so positions can never be exceeded
     payment: { type: Number, required: [true, "Payment amount is required"], min: 0 },
     paymentUnit: { type: String, enum: ["hour", "day", "month", "total"], default: "month" },
     status: {
